@@ -1,0 +1,91 @@
+# ====== Load data từ folder ======
+import os
+import numpy as np
+import cv2
+from keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
+
+dataset_path = "/content/data-mono-cropped"
+img_size = 96
+
+X = []
+y = []
+labels = sorted(os.listdir(dataset_path))  # danh sách tên người
+label_to_id = {name: idx for idx, name in enumerate(labels)}
+
+for label in labels:
+    folder = os.path.join(dataset_path, label)
+    for filename in os.listdir(folder):
+        if filename.lower().endswith((".jpg",".png",".jpeg")):
+            path = os.path.join(folder, filename)
+            img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            img = cv2.resize(img, (img_size, img_size))
+            X.append(img)
+            y.append(label_to_id[label])
+
+X = np.array(X).astype("float32") / 255.0
+y = np.array(y)
+
+# reshape về vector
+X = X.reshape((X.shape[0], img_size*img_size))
+y = to_categorical(y, num_classes=len(labels))
+
+# tách train/test
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print("Train shape:", X_train.shape, y_train.shape)
+print("Test shape:", X_test.shape, y_test.shape)
+
+# ====== Build ANN ======
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+
+model = Sequential()
+model.add(Dense(512, activation='relu', input_shape=(img_size*img_size,)))
+model.add(Dropout(0.4))
+model.add(Dense(256, activation='relu'))
+model.add(Dropout(0.3))
+model.add(Dense(len(labels), activation='softmax'))
+model.summary()
+
+# ====== Compile & Train ======
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.fit(X_train, y_train, epochs=30, batch_size=32, validation_data=(X_test, y_test))
+
+model.save('final_model.h5')
+np.save("class_labels.npy", label_to_id)
+
+# ====== Predict 1 ảnh ======
+import matplotlib.pyplot as plt
+from keras.models import load_model
+
+model1 = load_model('final_model.h5')
+class_indices = np.load("class_labels.npy", allow_pickle=True).item()
+id_to_label = {v:k for k,v in class_indices.items()}
+
+img = cv2.imread("Hinh12.jpg")
+img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+img_gray = cv2.resize(img_gray, (img_size, img_size))
+
+img_ready = img_gray.reshape((1, img_size*img_size))
+img_ready = img_ready.astype('float32') / 255
+
+preds = model1.predict(img_ready)
+digit = int(np.argmax(preds))
+label = id_to_label[digit]
+
+print("Predicted probs:", preds)
+print("Predicted class:", digit, "->", label)
+
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plt.imshow(img_rgb)
+plt.axis("off")
+plt.title("Ảnh gốc (RGB)")
+
+plt.subplot(1,2,2)
+plt.imshow(img_gray, cmap="gray")
+plt.axis("off")
+plt.title(f"Processed -> Dự đoán: {label}")
+plt.show()
