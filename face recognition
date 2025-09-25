@@ -1,0 +1,102 @@
+# ====== Load data từ folder ======
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from keras.models import load_model
+import cv2
+
+data_dir = "/content/data-mono-cropped"
+img_size = 128
+batch_size = 32
+
+train_datagen = ImageDataGenerator(
+    rescale=1.0/255.0,
+    validation_split=0.2,   # train 80%, val 20%
+    rotation_range=20,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    zoom_range=0.2,
+    horizontal_flip=True
+)
+
+train_generator = train_datagen.flow_from_directory(
+    directory=data_dir,
+    target_size=(img_size, img_size),
+    batch_size=batch_size,
+    class_mode="categorical",
+    subset="training",
+    shuffle=True
+)
+
+val_generator = train_datagen.flow_from_directory(
+    directory=data_dir,
+    target_size=(img_size, img_size),
+    batch_size=batch_size,
+    class_mode="categorical",
+    subset="validation",
+    shuffle=False
+)
+
+print("Classes:", train_generator.class_indices)
+
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Dense, Flatten, Dropout, BatchNormalization
+
+num_classes = len(train_generator.class_indices)
+
+model = Sequential([
+    Conv2D(32, (3,3), activation='relu', input_shape=(img_size, img_size, 3)),
+    BatchNormalization(),
+    MaxPooling2D((2,2)),
+
+    Conv2D(64, (3,3), activation='relu'),
+    BatchNormalization(),
+    MaxPooling2D((2,2)),
+
+    Conv2D(128, (3,3), activation='relu'),
+    BatchNormalization(),
+    MaxPooling2D((2,2)),
+
+    Flatten(),
+    Dense(256, activation='relu'),
+    Dropout(0.5),
+    Dense(num_classes, activation='softmax')
+])
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+model.summary()
+
+history = model.fit(
+    train_generator,
+    validation_data=val_generator,
+    epochs=25
+)
+
+model.save("face_cnn.h5")
+np.save("face_classes.npy", train_generator.class_indices)
+
+model1 = load_model("face_cnn.h5")
+class_indices = np.load("face_classes.npy", allow_pickle=True).item()
+id_to_label = {v:k for k,v in class_indices.items()}
+
+test_img_path = "dung1.jpg"   # thay đường dẫn ảnh của bạn
+img = cv2.imread(test_img_path)
+img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+img_resized = cv2.resize(img_rgb, (img_size, img_size))
+
+img_ready = img_resized.astype("float32") / 255.0
+img_ready = np.expand_dims(img_ready, axis=0)  # (1,128,128,3)
+
+preds = model1.predict(img_ready)
+digit = int(np.argmax(preds))
+label = id_to_label[digit]
+
+print("Predicted probs:", preds)
+print("Predicted class:", digit, "->", label)
+
+plt.figure(figsize=(6,3))
+plt.imshow(img_rgb)
+plt.axis("off")
+plt.title(f"Dự đoán: {label}")
+plt.show()
